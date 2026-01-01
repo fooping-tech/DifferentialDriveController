@@ -1,3 +1,5 @@
+![DifferentialDriveController](assets/image.png)
+
 # DifferentialDriveController (差動二輪ロボット用コントローラ)
 
 本プロジェクトはM5AtomS3 + AtomJoyを使い、USBシリアル経由でPCに左右タイヤの指示値を送る差動二輪ロボット用コントローラです。左右スティックYで左右タイヤを独立操作します。
