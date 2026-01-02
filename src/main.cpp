@@ -54,6 +54,13 @@ struct ZeroCenterState {
     uint32_t count;
 };
 
+struct BarRect {
+    int16_t x;
+    int16_t y;
+    int16_t w;
+    int16_t h;
+};
+
 constexpr uint16_t kRawResolution        = 4096;
 constexpr int16_t kNormalScale           = 1000;
 constexpr int16_t kBoostScale            = 2000;
@@ -272,8 +279,44 @@ void draw_value_bar_vertical(int16_t value, int16_t scale, int16_t x, int16_t y,
     }
 }
 
+bool compute_value_bar_vertical_rect(int16_t value, int16_t scale, int16_t x, int16_t y, int16_t width,
+                                     int16_t height, BarRect &rect) {
+    if (scale <= 0 || width <= 2 || height <= 2) return false;
+
+    int16_t clamped = value;
+    if (clamped > scale) clamped = scale;
+    if (clamped < -scale) clamped = -scale;
+
+    int16_t center     = y + height / 2;
+    int16_t inner_x    = x + 1;
+    int16_t inner_w    = width - 2;
+    int16_t inner_h    = height - 2;
+    int32_t half_span  = inner_h / 2;
+    int32_t magnitude  = (clamped >= 0) ? clamped : -clamped;
+    int32_t bar_length = (magnitude * half_span) / scale;
+
+    if (bar_length <= 0) return false;
+
+    rect.x = inner_x;
+    rect.w = inner_w;
+    rect.h = static_cast<int16_t>(bar_length);
+    rect.y = (clamped >= 0) ? static_cast<int16_t>(center - bar_length) : static_cast<int16_t>(center + 1);
+    return true;
+}
+
 void draw_control_screen(int16_t left_cmd, int16_t right_cmd, bool left_boost, bool right_boost) {
     static uint32_t last_draw_ms = 0;
+    static int16_t last_left_cmd = 0;
+    static int16_t last_right_cmd = 0;
+    static int16_t last_left_scale = 0;
+    static int16_t last_right_scale = 0;
+    static int16_t last_bar_width = 0;
+    static int16_t last_bar_height = 0;
+    static int16_t last_left_bar_x = 0;
+    static int16_t last_right_bar_x = 0;
+    static int16_t last_bars_top = 0;
+    static bool bars_initialized = false;
+
     uint32_t now_ms              = millis();
     if (now_ms - last_draw_ms < kUiMinIntervalMs) return;
     last_draw_ms = now_ms;
@@ -289,9 +332,16 @@ void draw_control_screen(int16_t left_cmd, int16_t right_cmd, bool left_boost, b
     int16_t bar_width   = (bar_area_w - bar_gap) / 2;
     int16_t left_bar_x  = margin_x;
     int16_t right_bar_x = left_bar_x + bar_width + bar_gap;
+    int16_t text_area_h = text_line_h * 3 + 2;
+    int16_t left_scale  = left_boost ? kBoostScale : kNormalScale;
+    int16_t right_scale = right_boost ? kBoostScale : kNormalScale;
+
+    bool layout_changed = !bars_initialized || last_bar_width != bar_width || last_bar_height != bar_height ||
+                          last_left_bar_x != left_bar_x || last_right_bar_x != right_bar_x ||
+                          last_bars_top != bars_top;
 
     display.startWrite();
-    display.fillScreen(TFT_BLACK);
+    display.fillRect(0, 0, screen_w, text_area_h, TFT_BLACK);
     display.setTextColor(TFT_WHITE, TFT_BLACK);
     display.setTextSize(1);
     display.setCursor(0, 0);
@@ -301,14 +351,36 @@ void draw_control_screen(int16_t left_cmd, int16_t right_cmd, bool left_boost, b
     display.setCursor(0, text_line_h * 2);
     display.printf("R:%+05d %s\n", right_cmd, right_boost ? "x2" : "x1");
     if (bar_width > 2 && bar_height > 2) {
+        if (layout_changed) {
+            display.fillRect(margin_x, bars_top, bar_area_w, bar_height, TFT_BLACK);
+        } else {
+            BarRect prev_rect;
+            if (compute_value_bar_vertical_rect(last_left_cmd, last_left_scale, left_bar_x, bars_top, bar_width,
+                                                bar_height, prev_rect)) {
+                display.fillRect(prev_rect.x, prev_rect.y, prev_rect.w, prev_rect.h, TFT_BLACK);
+            }
+            if (compute_value_bar_vertical_rect(last_right_cmd, last_right_scale, right_bar_x, bars_top, bar_width,
+                                                bar_height, prev_rect)) {
+                display.fillRect(prev_rect.x, prev_rect.y, prev_rect.w, prev_rect.h, TFT_BLACK);
+            }
+        }
         uint16_t left_color  = (left_cmd >= 0) ? TFT_GREEN : TFT_RED;
         uint16_t right_color = (right_cmd >= 0) ? TFT_GREEN : TFT_RED;
-        draw_value_bar_vertical(left_cmd, left_boost ? kBoostScale : kNormalScale, left_bar_x, bars_top,
-                                bar_width, bar_height, left_color);
-        draw_value_bar_vertical(right_cmd, right_boost ? kBoostScale : kNormalScale, right_bar_x, bars_top,
-                                bar_width, bar_height, right_color);
+        draw_value_bar_vertical(left_cmd, left_scale, left_bar_x, bars_top, bar_width, bar_height, left_color);
+        draw_value_bar_vertical(right_cmd, right_scale, right_bar_x, bars_top, bar_width, bar_height, right_color);
     }
     display.endWrite();
+
+    last_left_cmd = left_cmd;
+    last_right_cmd = right_cmd;
+    last_left_scale = left_scale;
+    last_right_scale = right_scale;
+    last_bar_width = bar_width;
+    last_bar_height = bar_height;
+    last_left_bar_x = left_bar_x;
+    last_right_bar_x = right_bar_x;
+    last_bars_top = bars_top;
+    bars_initialized = true;
 }
 
 }  // namespace
