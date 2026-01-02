@@ -32,8 +32,12 @@ L:<left>,R:<right>\n
 ### Calibration
 - At startup, the user is prompted to rotate both sticks through their full range.
 - The observed min/max values are used to map raw input to `-1000` to `1000`.
-- After full range is detected, the device waits 0.5 seconds before entering
-  control mode.
+- After full range is detected, the device prompts the user to release the
+  sticks and hold them still.
+- When full range completes, the device plays a 600 Hz beep twice (0.1s on,
+  0.1s silence, 0.1s on) to indicate the transition to zero-centering.
+- When both sticks remain within a 30-count window (max-min < 30) for 0.5
+  seconds, the zero center is captured and the device enters control mode.
 - Pressing the device button returns to calibration mode at any time.
 
 ## Update Rate

@@ -35,6 +35,11 @@ enum class ControlMode : uint8_t {
     Control,
 };
 
+enum class CalibrationPhase : uint8_t {
+    FullRange,
+    ZeroCenter,
+};
+
 struct StickCalibration {
     uint16_t min;
     uint16_t max;
@@ -42,12 +47,22 @@ struct StickCalibration {
     bool ready;
 };
 
+struct ZeroCenterState {
+    uint16_t min;
+    uint16_t max;
+    uint32_t sum;
+    uint32_t count;
+};
+
 constexpr uint16_t kRawResolution        = 4096;
 constexpr int16_t kNormalScale           = 1000;
 constexpr int16_t kBoostScale            = 2000;
 constexpr int16_t kDeadzone              = 40;
 constexpr uint16_t kCalibRangeThreshold  = (kRawResolution * 3) / 4;
+constexpr uint16_t kZeroCenterRangeLimit  = 30;
 constexpr uint32_t kCalibrationHoldMs    = 500;
+constexpr uint32_t kBeepDurationMs       = 100;
+constexpr uint32_t kBeepGapMs            = 100;
 constexpr uint32_t kUiMinIntervalMs      = 100;
 constexpr uint32_t kLoopIntervalUs       = 10000;
 
@@ -56,9 +71,13 @@ volatile uint8_t Loop_flag = 0;
 hw_timer_t *timer = nullptr;
 
 ControlMode control_mode            = ControlMode::Calibration;
+CalibrationPhase calibration_phase  = CalibrationPhase::FullRange;
 StickCalibration left_calibration   = {UINT16_MAX, 0, kRawResolution / 2, false};
 StickCalibration right_calibration  = {UINT16_MAX, 0, kRawResolution / 2, false};
+ZeroCenterState left_zero_center    = {UINT16_MAX, 0, 0, 0};
+ZeroCenterState right_zero_center   = {UINT16_MAX, 0, 0, 0};
 uint32_t calibration_complete_at_ms = 0;
+uint32_t zero_center_stable_at_ms   = 0;
 
 void IRAM_ATTR onTimer() {
     Loop_flag = 1;
@@ -78,8 +97,8 @@ bool calibration_range_ok(const StickCalibration &cal) {
     return (cal.max > cal.min) && ((cal.max - cal.min) >= kCalibRangeThreshold);
 }
 
-void finalize_calibration(StickCalibration &cal) {
-    cal.center = static_cast<uint16_t>((static_cast<uint32_t>(cal.min) + cal.max) / 2);
+void finalize_calibration(StickCalibration &cal, uint16_t center) {
+    cal.center = center;
     cal.ready  = true;
 }
 
@@ -90,11 +109,56 @@ void reset_calibration(StickCalibration &cal) {
     cal.ready  = false;
 }
 
+void reset_zero_center_state(ZeroCenterState &state) {
+    state.min   = UINT16_MAX;
+    state.max   = 0;
+    state.sum   = 0;
+    state.count = 0;
+}
+
+void seed_zero_center_state(ZeroCenterState &state, uint16_t raw) {
+    state.min   = raw;
+    state.max   = raw;
+    state.sum   = raw;
+    state.count = 1;
+}
+
+void update_zero_center_state(ZeroCenterState &state, uint16_t raw) {
+    if (state.count == 0) {
+        seed_zero_center_state(state, raw);
+        return;
+    }
+    if (raw < state.min) state.min = raw;
+    if (raw > state.max) state.max = raw;
+    state.sum += raw;
+    state.count++;
+}
+
+bool zero_center_range_ok(const ZeroCenterState &state) {
+    if (state.count == 0) return false;
+    return (state.max - state.min) < kZeroCenterRangeLimit;
+}
+
+void play_full_range_complete_beep() {
+    buzzer_sound(600, kBeepDurationMs);
+    delay(kBeepGapMs);
+    buzzer_sound(600, kBeepDurationMs);
+}
+
+uint16_t zero_center_average(const ZeroCenterState &state) {
+    if (state.count == 0) return kRawResolution / 2;
+    return static_cast<uint16_t>(state.sum / state.count);
+}
+
 void enter_calibration_mode() {
     control_mode                = ControlMode::Calibration;
+    calibration_phase           = CalibrationPhase::FullRange;
     calibration_complete_at_ms  = 0;
+    zero_center_stable_at_ms    = 0;
     reset_calibration(left_calibration);
     reset_calibration(right_calibration);
+    reset_zero_center_state(left_zero_center);
+    reset_zero_center_state(right_zero_center);
     display.fillScreen(TFT_BLACK);
     buzzer_sound(600, 200);
     buzzer_sound(440, 200);
@@ -126,7 +190,7 @@ int16_t map_raw_to_scaled(uint16_t raw, const StickCalibration &cal, int16_t sca
     return apply_deadzone(static_cast<int16_t>(value), kDeadzone);
 }
 
-void draw_calibration_screen(uint16_t left_raw, uint16_t right_raw, bool ready_to_switch) {
+void draw_calibration_range_screen(uint16_t left_raw, uint16_t right_raw, bool ready_to_switch) {
     static uint32_t last_draw_ms = 0;
     uint32_t now_ms              = millis();
     if (now_ms - last_draw_ms < kUiMinIntervalMs) return;
@@ -145,7 +209,35 @@ void draw_calibration_screen(uint16_t left_raw, uint16_t right_raw, bool ready_t
     display.printf("L min:%4u max:%4u\n", left_calibration.min, left_calibration.max);
     display.printf("R min:%4u max:%4u\n", right_calibration.min, right_calibration.max);
     if (ready_to_switch) {
-        display.println("Calib ok, switching...");
+        display.println("Range ok, release sticks");
+    }
+    display.endWrite();
+}
+
+void draw_zero_center_screen(uint16_t left_raw, uint16_t right_raw, bool ready_to_switch) {
+    static uint32_t last_draw_ms = 0;
+    uint32_t now_ms              = millis();
+    if (now_ms - last_draw_ms < kUiMinIntervalMs) return;
+    last_draw_ms = now_ms;
+
+    uint16_t left_span  = (left_zero_center.count == 0) ? 0 : (left_zero_center.max - left_zero_center.min);
+    uint16_t right_span = (right_zero_center.count == 0) ? 0 : (right_zero_center.max - right_zero_center.min);
+
+    display.startWrite();
+    display.fillScreen(TFT_BLACK);
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("CALIBRATION");
+    display.println("Release sticks");
+    display.println("Hold still 0.5s");
+    display.println("");
+    display.printf("L raw:  %4u\n", left_raw);
+    display.printf("R raw:  %4u\n", right_raw);
+    display.printf("L span: %4u\n", left_span);
+    display.printf("R span: %4u\n", right_span);
+    if (ready_to_switch) {
+        display.println("Center ok, switching...");
     }
     display.endWrite();
 }
@@ -209,27 +301,58 @@ void loop() {
     }
 
     if (control_mode == ControlMode::Calibration) {
-        update_calibration(left_calibration, left_raw);
-        update_calibration(right_calibration, right_raw);
+        if (calibration_phase == CalibrationPhase::FullRange) {
+            update_calibration(left_calibration, left_raw);
+            update_calibration(right_calibration, right_raw);
 
-        bool range_ok = calibration_range_ok(left_calibration) && calibration_range_ok(right_calibration);
-        if (range_ok) {
-            if (calibration_complete_at_ms == 0) {
-                calibration_complete_at_ms = millis();
-            } else if (millis() - calibration_complete_at_ms >= kCalibrationHoldMs) {
-                finalize_calibration(left_calibration);
-                finalize_calibration(right_calibration);
-                control_mode = ControlMode::Control;
+            bool range_ok = calibration_range_ok(left_calibration) && calibration_range_ok(right_calibration);
+            if (range_ok) {
+                if (calibration_complete_at_ms == 0) {
+                    calibration_complete_at_ms = millis();
+                } else if (millis() - calibration_complete_at_ms >= kCalibrationHoldMs) {
+                    calibration_phase          = CalibrationPhase::ZeroCenter;
+                    calibration_complete_at_ms = 0;
+                    zero_center_stable_at_ms   = 0;
+                    reset_zero_center_state(left_zero_center);
+                    reset_zero_center_state(right_zero_center);
+                    display.fillScreen(TFT_BLACK);
+                    play_full_range_complete_beep();
+                }
+            } else {
                 calibration_complete_at_ms = 0;
+            }
+
+            draw_calibration_range_screen(left_raw, right_raw, range_ok);
+            return;
+        }
+
+        update_zero_center_state(left_zero_center, left_raw);
+        update_zero_center_state(right_zero_center, right_raw);
+
+        bool left_stable  = zero_center_range_ok(left_zero_center);
+        bool right_stable = zero_center_range_ok(right_zero_center);
+        bool stable       = left_stable && right_stable;
+
+        if (stable) {
+            if (zero_center_stable_at_ms == 0) {
+                zero_center_stable_at_ms = millis();
+            } else if (millis() - zero_center_stable_at_ms >= kCalibrationHoldMs) {
+                finalize_calibration(left_calibration, zero_center_average(left_zero_center));
+                finalize_calibration(right_calibration, zero_center_average(right_zero_center));
+                control_mode             = ControlMode::Control;
+                calibration_phase        = CalibrationPhase::FullRange;
+                zero_center_stable_at_ms = 0;
                 display.fillScreen(TFT_BLACK);
                 buzzer_sound(440, 200);
                 buzzer_sound(600, 200);
             }
         } else {
-            calibration_complete_at_ms = 0;
+            zero_center_stable_at_ms = 0;
+            seed_zero_center_state(left_zero_center, left_raw);
+            seed_zero_center_state(right_zero_center, right_raw);
         }
 
-        draw_calibration_screen(left_raw, right_raw, range_ok);
+        draw_zero_center_screen(left_raw, right_raw, stable);
         return;
     }
 

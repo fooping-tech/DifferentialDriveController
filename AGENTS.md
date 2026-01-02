@@ -3,3 +3,5 @@
 When writing complex features or significant refactors, use an ExecPlan (as described in .agent/PLANS.md) from design to implementation.
 
 When changing program behavior, also update any relevant documentation under the docs/ folder.
+
+When running tests or builds, use `~/.platformio/penv/bin/pio` instead of relying on PATH.

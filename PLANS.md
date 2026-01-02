@@ -10,6 +10,7 @@ STAMPFLYCONTROLLERを差動二輪ロボット用コントローラに作り替�
 
 ## Progress
 
+- [x] (2026-01-02) キャリブレーションをフルレンジ計測後に0点補正へ移行する（max-min < 30で500ms静止）。
 - [x] (2025-02-14 03:00Z) ジョイスティックの生値レンジと向きを確認し、左右タイヤ用に正規化手順を決定する。
 - [x] (2025-02-14 03:00Z) `src/main.cpp`と`lib/ATOMS3Joy/atoms3joy.*`に左右タイヤ指示値の変換関数と生値取得関数を追加する。
 - [x] (2025-02-14 03:00Z) `loop()`内の送信処理をシリアル送信に置換し、ESP-NOW送信を無効化する。
@@ -27,6 +28,9 @@ STAMPFLYCONTROLLERを差動二輪ロボット用コントローラに作り替�
 - Decision: 初期状態ではテキスト1行1フレーム形式`L:<value>,R:<value>`で送信する。
   Rationale: PC側の受信実装が簡単で、デバッグが容易なため。
   Date/Author: 2025-02-14 / Codex
+- Decision: キャリブレーションはフルレンジ計測後に0点補正を行い、500msの静止（max-min < 30）で中心を確定する。
+  Rationale: min/max計測の結果を保持しながら中心補正を確定でき、実装が単純になるため。
+  Date/Author: 2026-01-02 / Codex
 - Decision: 左右スティックYの生値は`lib/ATOMS3Joy/atoms3joy.*`に専用getterを追加して取得する。
   Rationale: 既存のスティック割当（THROTTLE等）に依存せず、左右固定の読み取りを保証するため。
   Date/Author: 2025-02-14 / Codex
