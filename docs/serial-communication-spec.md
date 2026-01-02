@@ -55,4 +55,5 @@ L:-300,R:-310
 - The firmware may print other human-readable status lines during startup; a
   robust parser should ignore any line that does not start with `L:`.
 - The controller displays the current mode and latest `L`/`R` values on the
-  device screen for quick verification.
+  device screen, along with vertical bar graphs (left stick on the left, right
+  stick on the right) for quick verification.

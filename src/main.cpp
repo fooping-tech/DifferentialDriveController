@@ -242,11 +242,53 @@ void draw_zero_center_screen(uint16_t left_raw, uint16_t right_raw, bool ready_t
     display.endWrite();
 }
 
+void draw_value_bar_vertical(int16_t value, int16_t scale, int16_t x, int16_t y, int16_t width, int16_t height,
+                             uint16_t color) {
+    if (scale <= 0 || width <= 2 || height <= 2) return;
+
+    int16_t clamped = value;
+    if (clamped > scale) clamped = scale;
+    if (clamped < -scale) clamped = -scale;
+
+    int16_t center     = y + height / 2;
+    int16_t inner_x    = x + 1;
+    int16_t inner_w    = width - 2;
+    int16_t inner_h    = height - 2;
+    int32_t half_span  = inner_h / 2;
+    int32_t magnitude  = (clamped >= 0) ? clamped : -clamped;
+    int32_t bar_length = (magnitude * half_span) / scale;
+
+    display.drawRect(x, y, width, height, TFT_WHITE);
+    display.drawFastHLine(x, center, width, TFT_DARKGREY);
+
+    if (bar_length <= 0) return;
+
+    if (clamped >= 0) {
+        int16_t bar_y = center - static_cast<int16_t>(bar_length);
+        display.fillRect(inner_x, bar_y, inner_w, static_cast<int16_t>(bar_length), color);
+    } else {
+        int16_t bar_y = center + 1;
+        display.fillRect(inner_x, bar_y, inner_w, static_cast<int16_t>(bar_length), color);
+    }
+}
+
 void draw_control_screen(int16_t left_cmd, int16_t right_cmd, bool left_boost, bool right_boost) {
     static uint32_t last_draw_ms = 0;
     uint32_t now_ms              = millis();
     if (now_ms - last_draw_ms < kUiMinIntervalMs) return;
     last_draw_ms = now_ms;
+
+    int16_t screen_w    = display.width();
+    int16_t screen_h    = display.height();
+    int16_t text_line_h = 12;
+    int16_t bars_top    = text_line_h * 3 + 4;
+    int16_t bar_height  = screen_h - bars_top - 2;
+    int16_t margin_x    = 4;
+    int16_t bar_gap     = 6;
+    int16_t bar_area_w  = screen_w - (margin_x * 2);
+    int16_t bar_width   = (bar_area_w - bar_gap) / 2;
+    int16_t left_bar_x  = margin_x;
+    int16_t right_bar_x = left_bar_x + bar_width + bar_gap;
 
     display.startWrite();
     display.fillScreen(TFT_BLACK);
@@ -254,9 +296,18 @@ void draw_control_screen(int16_t left_cmd, int16_t right_cmd, bool left_boost, b
     display.setTextSize(1);
     display.setCursor(0, 0);
     display.println("CONTROL");
-    display.println("");
+    display.setCursor(0, text_line_h);
     display.printf("L:%+05d %s\n", left_cmd, left_boost ? "x2" : "x1");
+    display.setCursor(0, text_line_h * 2);
     display.printf("R:%+05d %s\n", right_cmd, right_boost ? "x2" : "x1");
+    if (bar_width > 2 && bar_height > 2) {
+        uint16_t left_color  = (left_cmd >= 0) ? TFT_GREEN : TFT_RED;
+        uint16_t right_color = (right_cmd >= 0) ? TFT_GREEN : TFT_RED;
+        draw_value_bar_vertical(left_cmd, left_boost ? kBoostScale : kNormalScale, left_bar_x, bars_top,
+                                bar_width, bar_height, left_color);
+        draw_value_bar_vertical(right_cmd, right_boost ? kBoostScale : kNormalScale, right_bar_x, bars_top,
+                                bar_width, bar_height, right_color);
+    }
     display.endWrite();
 }
 
