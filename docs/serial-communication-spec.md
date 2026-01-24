@@ -57,3 +57,8 @@ L:-300,R:-310
 - The controller displays the current mode and latest `L`/`R` values on the
   device screen, along with vertical bar graphs (left stick on the left, right
   stick on the right) for quick verification.
+
+## ROS 2 Bridge
+If you want to publish these commands as a ROS 2 topic on the host PC, use the
+bridge script in `tools/ros2_serial_bridge.py`. See `docs/ros2-bridge.md` for
+setup and usage.

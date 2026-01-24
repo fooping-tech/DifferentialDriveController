@@ -37,6 +37,15 @@
     L:250,R:240
     L:-300,R:-310
 
+## ROS 2でtopicとして受け取る
+
+USBシリアル出力をROS 2トピックとしてパブリッシュしたい場合は、ホストPC側で
+ブリッジスクリプトを実行します。
+
+    python3 tools/ros2_serial_bridge.py --port /dev/ttyACM0
+
+詳細は `docs/ros2-bridge.md` を参照してください。
+
 ## Framework
 
 PlatformIO
